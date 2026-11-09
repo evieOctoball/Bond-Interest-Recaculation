@@ -1,4 +1,9 @@
-pdfplumber
-rapidfuzz
+pandas
 openpyxl
+numpy
+opencv-python
+pytesseract
+pdfplumber
+thefuzz
+python-Levenshtein
 streamlit-authenticator
