@@ -1,0 +1,4 @@
+pdfplumber
+rapidfuzz
+openpyxl
+streamlit-authenticator
