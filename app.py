@@ -5,9 +5,9 @@ import re
 
 st.set_page_config(page_title="Bond Interest Reconciliation", layout="wide")
 
-st.title("Bond Interest 对账系统")
+st.title("💼 Bond Interest 对账系统")
 
-# 1. 固定的 Enfusion 债券标准列表
+# 1. 完整固定的 Enfusion 债券标准列表
 DEFAULT_ENFUSION_ISSUERS = [
     "ACHIEVER INVESTMENT LTD",
     "ANHUI TRANSPORTATION HOLDING GROUP HK LTD",
@@ -123,10 +123,10 @@ DEFAULT_ENFUSION_ISSUERS = [
     "WUHAN METRO GROUP CO LTD",
     "West China Cement Ltd",
     "Wynn Macau, Limited",
-    "WYNNM 6.750 02/15/34'28 PUT - CIBHK",
-    "WYNNM 5.625 08/26/28 '23 - CIBHK",
-    "WYNNM 5.625 08/26/28 '23 - CISL",
-    "WYNNM 6.750 02/15/34'28 PUT - CISL",
+    "WYNNM 6.750 02/15/34'28 PUT",
+    "WYNNM 5.625 08/26/28 '23",
+    "WYNNM 5.625 08/26/28 '23",
+    "WYNNM 6.750 02/15/34'28 PUT",
     "XIANJIN INDUSTRY INVESTMENT COMPANY LTD",
     "XINGYE GOLD HONG KONG MINING CO LTD",
     "Yuzhou Group Holdings Co Ltd",
@@ -138,49 +138,31 @@ DEFAULT_ENFUSION_ISSUERS = [
     "Zhenro Properties Group Ltd"
 ]
 
-# --- 侧边栏：上传文件 ---
-st.sidebar.header("上传对账文件")
-mapping_file = st.sidebar.file_uploader("上传映射表 (Apex Name & Enfusion Name.xlsx)", type=["xlsx"])
-apex_file = st.sidebar.file_uploader("上传 Apex 报告 (Excel)", type=["xlsx", "xls"])
+# --- 2. 核心解析函数定义 (定义在全局作用域，确保干净独立) ---
 
-if mapping_file and apex_file:
-    mapping_df = pd.read_excel(mapping_file)
-    
-    def parse_apex_file(apex_file):
-    # 1. 不设置死板的 skiprows，先直接读取整张表（假设第一行就是表头，或者没有多余的说明行）
-    # 如果清洗后的表第一行是表头，则 header=0
+def parse_apex_file(apex_file):
     df_apex = pd.read_excel(apex_file)
-    
-    # 清洗所有列名的空格，转为字符串
     df_apex.columns = [str(c).strip() for c in df_apex.columns]
     
-    # 2. 智能寻找“债券名称/标识列”
-    # 遍历所有列，寻找包含 BBG、Identifier、Description 或文本特征的列
     name_col = None
     for col in df_apex.columns:
-        # 检查该列的前几个非空值是否包含债券特征（如 LTD, PLC, CORP, BBG 等）
         sample_vals = df_apex[col].dropna().astype(str).head(5).values
         if any('BBG' in val or 'LTD' in val or 'CORP' in val or 'PLC' in val for val in sample_vals):
             name_col = col
             break
             
-    # 如果上面没自动找到，退回到默认用第 3 列（索引 3，通常是 Identifier/Description 所在列）
     if not name_col:
         name_col = df_apex.columns[3] if len(df_apex.columns) > 3 else df_apex.columns[0]
 
-    # 3. 智能寻找“利息金额列”
-    # 寻找包含数字、最后一列、或者列名包含 USD / Amount 的列
-    amount_col = df_apex.columns[-1] # 默认兜底取最后一列
+    amount_col = df_apex.columns[-1]
     for col in df_apex.columns:
         if 'USD' in str(col).upper() or 'ACC' in str(col).upper() or 'AMOUNT' in str(col).upper():
             amount_col = col
             break
 
-    # 4. 提取并清洗数据
     apex_df = df_apex[[name_col, amount_col]].copy()
     apex_df.columns = ['APEX_NAME', 'APEX_AMOUNT']
     
-    # 清洗金额列：去除 '$'、','、空格，把 '-' 或非法字符转为 0.0
     apex_df['APEX_AMOUNT'] = (
         apex_df['APEX_AMOUNT']
         .astype(str)
@@ -189,57 +171,52 @@ if mapping_file and apex_file:
         .str.strip()
     )
     apex_df['APEX_AMOUNT'] = pd.to_numeric(apex_df['APEX_AMOUNT'], errors='coerce').fillna(0.0)
-    
-    # 去除债券名称为空的行
     apex_df = apex_df.dropna(subset=['APEX_NAME'])
-    
     return apex_df
-
-    # --- 主界面：整列文本粘贴输入 ---
-    st.subheader("📋 粘贴 Enfusion 的 Base Amount 序列")
-    st.markdown("左侧是固定的债券名称列表，你只需要在下方文本框中**直接复制粘贴 Enfusion 那一整列金额**（支持换行、带有 `$` 或被截断换行的数字），系统会按顺序自动对齐！")
-
-    # 默认给出一个模拟的带换行和美元符号的文本示例
-    default_pasted_text = """$0.00
-$0.00
-$2,061.14
-$0.00
-$19,833.33
-$0.00
-$0.00
-$38,000.00
-$8,854.17
-$0.00
-$33,1
-60.83"""
-
-    pasted_text = st.text_area("在此处粘贴金额列 (Base Amount)", value=default_pasted_text, height=200)
 
 
 def parse_amounts_text(text, expected_len):
     """
-    专门针对 '$0.00$0.00$8,305.56...' 这种无缝粘连、靠 $ 分隔的文本进行解析
+    专门针对 '$0.00$0.00$8,305.56...' 这种无缝粘连、靠 $ 分隔或换行的文本进行智能解析
     """
-    # 1. 如果文本中包含 $，我们可以直接用 $ 作为切分依据
-    # 或者用正则表达式查找所有以 $ 开头、直到下一个 $ 或结尾的金额片段
-    # 比如匹配形如 $[0-9,.]+ 的模式
     pattern = r'\$[0-9,]+(?:\.[0-9]+)?'
     found_matches = re.findall(pattern, text)
     
     parsed_vals = []
     for item in found_matches:
-        # 移除 $ 和逗号，转成浮点数
         clean_str = item.replace('$', '').replace(',', '').strip()
         try:
             parsed_vals.append(float(clean_str))
         except ValueError:
             parsed_vals.append(0.0)
             
-    # 2. 补齐或截断到与标准债券列表长度一致
     if len(parsed_vals) < expected_len:
         parsed_vals.extend([0.0] * (expected_len - len(parsed_vals)))
         
     return parsed_vals[:expected_len]
+
+
+# --- 3. 侧边栏：上传文件 ---
+st.sidebar.header("上传对账文件")
+mapping_file = st.sidebar.file_uploader("上传映射表 (Apex Name & Enfusion Name.xlsx)", type=["xlsx"])
+apex_file = st.sidebar.file_uploader("上传 Apex 报告 (Excel)", type=["xlsx", "xls"])
+
+# --- 4. 主界面逻辑 ---
+if mapping_file and apex_file:
+    mapping_df = pd.read_excel(mapping_file)
+    
+    # 调用 Apex 解析函数
+    apex_df = parse_apex_file(apex_file)
+
+    st.subheader("📋 粘贴 Enfusion 的 Base Amount 序列")
+    st.markdown("左侧是固定的债券名称列表，你只需要在下方文本框中直接复制粘贴 Enfusion 那一整列金额（支持 `$0.00$0.00$8,305.56` 这种粘连格式），系统会按顺序自动对齐！")
+
+    default_pasted_text = "$0.00$0.00$2,061.14$0.00$19,833.33$0.00"
+    pasted_text = st.text_area("在此处粘贴金额列 (Base Amount)", value=default_pasted_text, height=150)
+
+    # 执行文本解析
+    parsed_amounts = parse_amounts_text(pasted_text, len(DEFAULT_ENFUSION_ISSUERS))
+
     # 构造预览表格
     preview_df = pd.DataFrame({
         "ENFUSION_ISSUER": DEFAULT_ENFUSION_ISSUERS,
@@ -249,9 +226,10 @@ def parse_amounts_text(text, expected_len):
     st.markdown("👀 **解析后的债券与金额对应预览：**")
     st.dataframe(preview_df, use_container_width=True, height=200)
 
-    # --- 开始对账计算 ---
+    # --- 对账计算按钮 ---
     if st.button("🚀 开始执行对账", type="primary"):
-        enfusion_df = preview_df[preview_df['ENFUSION_AMOUNT'] != 0].copy()
+        # 仅取金额不为 0 或者全部参与对账
+        enfusion_df = preview_df.copy()
         
         # 映射字典
         mapping_dict = dict(zip(mapping_df['APEX'].astype(str).str.strip(), 
