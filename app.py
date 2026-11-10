@@ -5,7 +5,7 @@ import re
 
 st.set_page_config(page_title="Bond Interest Reconciliation", layout="wide")
 
-st.title("💼 Bond Interest 对账系统")
+st.title("SP6 Bond Interest 对账系统")
 
 # 1. 完整固定的 Enfusion 债券标准列表
 DEFAULT_ENFUSION_ISSUERS = [
@@ -144,14 +144,9 @@ def parse_apex_file(apex_file):
     # 直接读取 Excel，不设表头
     df_apex = pd.read_excel(apex_file, header=None)
     
-    # 根据你的截图：
-    # 债券名称在第 3 列（Python 索引为 2，即 Excel 的 C 列）
-    name_col_idx = 2 
-    # 金额在最后一列（Python 索引为 -1，即截图中最右侧的金额列）
-    amount_col_idx = -1 
-    
-    # 提取并重命名
-    apex_df = df_apex[[name_col_idx, amount_col_idx]].copy()
+    # 必须使用 .iloc[:, [列索引1, 列索引2]] 按绝对位置抓取
+    # 2 代表第 3 列（债券名称 C列），-1 代表最后一列（利息金额）
+    apex_df = df_apex.iloc[:, [2, -1]].copy()
     apex_df.columns = ['APEX_NAME', 'APEX_AMOUNT']
     
     # 清洗金额列：去除 '$'、','、空格，把 '-' 或非法字符转为 0.0
@@ -168,7 +163,6 @@ def parse_apex_file(apex_file):
     apex_df = apex_df.dropna(subset=['APEX_NAME'])
     
     return apex_df
-
 
 def parse_amounts_text(text, expected_len):
     """
