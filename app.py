@@ -141,28 +141,20 @@ DEFAULT_ENFUSION_ISSUERS = [
 # --- 2. 核心解析函数定义 (定义在全局作用域，确保干净独立) ---
 
 def parse_apex_file(apex_file):
-    df_apex = pd.read_excel(apex_file)
-    df_apex.columns = [str(c).strip() for c in df_apex.columns]
+    # 直接读取 Excel，不设表头
+    df_apex = pd.read_excel(apex_file, header=None)
     
-    name_col = None
-    for col in df_apex.columns:
-        sample_vals = df_apex[col].dropna().astype(str).head(5).values
-        if any('BBG' in val or 'LTD' in val or 'CORP' in val or 'PLC' in val for val in sample_vals):
-            name_col = col
-            break
-            
-    if not name_col:
-        name_col = df_apex.columns[3] if len(df_apex.columns) > 3 else df_apex.columns[0]
-
-    amount_col = df_apex.columns[-1]
-    for col in df_apex.columns:
-        if 'USD' in str(col).upper() or 'ACC' in str(col).upper() or 'AMOUNT' in str(col).upper():
-            amount_col = col
-            break
-
-    apex_df = df_apex[[name_col, amount_col]].copy()
+    # 根据你的截图：
+    # 债券名称在第 3 列（Python 索引为 2，即 Excel 的 C 列）
+    name_col_idx = 2 
+    # 金额在最后一列（Python 索引为 -1，即截图中最右侧的金额列）
+    amount_col_idx = -1 
+    
+    # 提取并重命名
+    apex_df = df_apex[[name_col_idx, amount_col_idx]].copy()
     apex_df.columns = ['APEX_NAME', 'APEX_AMOUNT']
     
+    # 清洗金额列：去除 '$'、','、空格，把 '-' 或非法字符转为 0.0
     apex_df['APEX_AMOUNT'] = (
         apex_df['APEX_AMOUNT']
         .astype(str)
@@ -171,7 +163,10 @@ def parse_apex_file(apex_file):
         .str.strip()
     )
     apex_df['APEX_AMOUNT'] = pd.to_numeric(apex_df['APEX_AMOUNT'], errors='coerce').fillna(0.0)
+    
+    # 去除债券名称为空的行
     apex_df = apex_df.dropna(subset=['APEX_NAME'])
+    
     return apex_df
 
 
